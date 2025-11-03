@@ -259,9 +259,6 @@ func promptConfig(saveCredential bool) error {
 
 	// try to connect the repo webdav to check authentication
 	cli = dav.NewClient(davBaseURL, repoUser, repoPass)
-	if err := cli.Connect(); err != nil {
-		return err
-	}
 
 	// save to configuration file `configFile`
 	return saveConfig(davBaseURL, repoUser, repoPass, saveCredential)

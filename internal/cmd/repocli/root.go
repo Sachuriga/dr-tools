@@ -122,35 +122,45 @@ func New() *cobra.Command {
 		cmd.AddCommand(cdCmd, pwdCmd, lcdCmd, lpwdCmd, llsCmd())
 	}
 
-	cmd.AddCommand(versionCmd, lsCmd(), putCmd(), getCmd(), mgetCmd(), mputCmd(), rmCmd(), mvCmd(), cpCmd(), mkdirCmd, configCmd)
+	cmd.AddCommand(versionCmd, loginCmd(), lsCmd(), putCmd(), getCmd(), mgetCmd(), mputCmd(), rmCmd(), mvCmd(), cpCmd(), mkdirCmd, configCmd)
 
 	return cmd
 }
 
 // initDavClient initialize the DavClient instance
 func initDavClient(prompt bool) error {
-	c, err := config.LoadConfig(configFile)
 
-	switch {
-	case err != nil && !prompt:
-		return err
-	case err != nil && prompt:
-		log.Warnf("configuration file not found: %s", configFile)
-		return promptConfig(true)
-	default:
-		repoCfg := c.Repository
-
-		repoUser := repoCfg.Username
-		repoPass, _ := decryptPass(repoUser, repoCfg.Password)
-		baseURL := repoCfg.BaseURL
-
-		if cli == nil || (baseURL != "" && baseURL != davBaseURL) {
-			// initiate a new webdav client with new baseURL
-			davBaseURL = baseURL
-			cli = dav.NewClient(baseURL, repoUser, repoPass)
-		}
-		return nil
+	cfg, err := filepath.Abs(configFile)
+	if err != nil {
+		return fmt.Errorf("cannot resolve config path: %s", configFile)
 	}
+	_, err = os.Stat(cfg)
+	if os.IsNotExist(err) {
+		if !prompt {
+			log.Warnf("configuration file doesn't exist: %s, run `repocli config` first", configFile)
+			return err
+		}
+		log.Infof("setting up client configuration file: %s", configFile)
+		return promptConfig(true)
+	}
+
+	// load configuration file when it exists
+	c, err := config.LoadConfig(configFile)
+	if err != nil {
+		return err
+	}
+
+	repoCfg := c.Repository
+	repoUser := repoCfg.Username
+	repoPass, _ := decryptPass(repoUser, repoCfg.Password)
+	baseURL := repoCfg.BaseURL
+
+	if cli == nil || (baseURL != "" && baseURL != davBaseURL) {
+		// initiate a new webdav client with new baseURL
+		davBaseURL = baseURL
+		cli = dav.NewClient(davBaseURL, repoUser, repoPass)
+	}
+	return nil
 }
 
 // versionCmd prints out the version number of the package.

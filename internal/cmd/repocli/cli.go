@@ -64,6 +64,43 @@ var mgetStrip string
 var mputDir string
 var mputStrip string
 var parents bool
+var stdlogin bool = false
+var nologin bool = false
+
+// command to login webdav
+func loginCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "login [<repo_file|repo_dir>]",
+		Short: "validate the WebDAV credential",
+		Long: `
+The "login" subcommand tests if the provided credential is a valid one.
+
+By default, it checks credential with a Radboud Data Repository specific mechanism.  Use "--standard" option for the standard WebDAV credential check (i.e. via the HTTP "OPTIONS" request).
+		`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+
+			var err error
+
+			if !stdlogin {
+				_, err = cli.Stat("/.login")
+			} else {
+				err = cli.Connect()
+			}
+
+			if err != nil {
+				return fmt.Errorf("login failed: %s", err)
+			}
+
+			log.Infof("success")
+			return nil
+		},
+	}
+
+	cmd.Flags().BoolVarP(&stdlogin, "standard", "", stdlogin, "apply standard WebDAV login")
+
+	return cmd
+}
 
 // command to list a file or the content of a directory in the repository.
 func lsCmd() *cobra.Command {
@@ -77,6 +114,8 @@ The "ls" subcommand is for listing a repository file or the content of a reposit
 The optional argument is used to specify the file or directory in the repository to be listed. The argument can be in form of an absolute or relative WebDAV path with the path separator "/", for example, "/dccn/DAC_3010000.01_173/data".
 
 If no argument is provided, it lists the content of the root ("/") WebDAV path.
+
+By default, it combines Radboud Data Repository WebDAV login to list both public and restricted data collections.  Use the option "--public" for listing only the public Radboud Data Repository collections, 
 		`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -87,6 +126,12 @@ If no argument is provided, it lists the content of the root ("/") WebDAV path.
 			}
 
 			files := make([]fs.FileInfo, 0)
+
+			if !nologin {
+				if _, err := cli.Stat("/.login"); err != nil {
+					return fmt.Errorf("login failed: %s, wrong or expired credential?", err)
+				}
+			}
 
 			// check path state
 			if f, err := cli.Stat(p); err == nil {
@@ -156,6 +201,7 @@ If no argument is provided, it lists the content of the root ("/") WebDAV path.
 	}
 
 	cmd.Flags().BoolVarP(&longformat, "long", "l", false, "list files with more detail")
+	cmd.Flags().BoolVarP(&nologin, "public", "", nologin, "list only the public Radboud Data Repository collections")
 
 	return cmd
 }
