@@ -1,6 +1,6 @@
-# repocli: cross-platform CLI for managing the Donders Repository data
+# repocli: cross-platform CLI for managing the Radboud Data Repository data
 
-A command-line tool for performing basic operations on the data content (not the metadata) of the Donders Repository collections.  In essense, it uses the WebDAV protocol to implemente the operations; therefore it is also a genetic tool for managing data accessible via WebDAV with the HTTP basic authentication (e.g. [SURFDrive](https://wiki.surfnet.nl/display/SURFdrive/Accessing+files+via+WebDAV)).
+A command-line tool for performing basic operations on the data content (not the metadata) of the [Radboud Data Repository](https://data.ru.nl) collections.  In essense, it uses the WebDAV protocol to implemente the operations; therefore it is also a genetic tool for managing data accessible via WebDAV with the HTTP basic authentication (e.g. [SURFDrive](https://wiki.surfnet.nl/display/SURFdrive/Accessing+files+via+WebDAV)).
 
 The following operations are currently implemented:
 
@@ -55,7 +55,7 @@ Available Commands:
   version     print version number and exit
 
 Flags:
-  -c, --config path       path of the configuration YAML file. (default "/home/honlee/.repocli.yml")
+  -c, --config path       path of the configuration YAML file. (default "/home/tg/honlee/.repocli.yml")
   -h, --help              help for repocli
   -n, --nthreads number   number of concurrent worker threads. (default 4)
   -s, --silent            set to slient mode (i.e. do not show progress)
@@ -73,7 +73,9 @@ The credential (username and password) of the data-access account should be prov
 $ repocli config
 ```
 
-You will be asked to provide the WebDAV's baseURL, username and password.  For the Donders Repository users, the baseURL is `https://webdav.data.ru.nl`.  The username and password are your data-access account credential.
+You will be asked to provide the WebDAV's baseURL, username and password.  For the Radboud Data Repository users, the baseURL is `https://webdav.data.ru.nl`.  The username and password are your data-access account credential.  The credentail can be retrieved from the RDR web portal.  See the screenshot below as an example:
+
+![screenshot of RDR data-access credential](screenshot-rdr-da-credential.png)
 
 If non-empty username and password are both provided, `repocli` will make WebDAV connection with the [BasicAuth](https://en.wikipedia.org/wiki/Basic_access_authentication) authentication.  When the username or password is an empty value, `repocli` will connect to WebDAV without any authentication.
 
