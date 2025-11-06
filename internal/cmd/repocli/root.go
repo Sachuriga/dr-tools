@@ -158,7 +158,7 @@ func initDavClient(prompt bool) error {
 	if cli == nil || (baseURL != "" && baseURL != davBaseURL) {
 		// initiate a new webdav client with new baseURL
 		davBaseURL = baseURL
-		cli = dav.NewClient(davBaseURL, repoUser, repoPass)
+		cli = dav.NewAuthClient(davBaseURL, dav.NewPreemptiveAuth(&BasicAuth{user: repoUser, pw: repoPass}))
 	}
 	return nil
 }

@@ -127,12 +127,6 @@ By default, it combines Radboud Data Repository WebDAV login to list both public
 
 			files := make([]fs.FileInfo, 0)
 
-			if !nologin {
-				if _, err := cli.Stat("/.login"); err != nil {
-					return fmt.Errorf("login failed: %s, wrong or expired credential?", err)
-				}
-			}
-
 			// check path state
 			if f, err := cli.Stat(p); err == nil {
 				if !f.IsDir() {
