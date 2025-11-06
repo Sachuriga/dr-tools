@@ -40,10 +40,10 @@ Usage:
 
 Available Commands:
   completion  Generate the autocompletion script for the specified shell
+  config      configure the repository connection and save the credential
   cp          copy file or directory in the repository
   get         download file or directory from the repository
   help        Help about any command
-  login       login the repository with the data-access account
   ls          list file or directory in the repository
   mget        download multiple files or directories from the repository
   mkdir       create new directory in the repository
@@ -52,6 +52,7 @@ Available Commands:
   put         upload file or directory to the repository
   rm          remove file or directory from the repository
   shell       start an interactive shell
+  version     print version number and exit
 
 Flags:
   -c, --config path       path of the configuration YAML file. (default "/home/honlee/.repocli.yml")
@@ -69,14 +70,16 @@ __The configuration file__
 The credential (username and password) of the data-access account should be provided in a configuration file (specified by the `-c` option) in the YAML format.  The default location of this configuration file is `${HOME}/.repocli.yml` on Linux/MacOSX and `C:\Users\<username>\.repocli.yml` on Windows.  Since the program expects that the password stored in the configuration file is encrypted, it is better to use the following command to generate (or overwrite) the file:
 
 ```bash
-$ repocli login
+$ repocli config
 ```
 
 You will be asked to provide the WebDAV's baseURL, username and password.  For the Donders Repository users, the baseURL is `https://webdav.data.donders.ru.nl`.  The username and password are your data-access account credential, see [here](https://data.donders.ru.nl/doc/help/helppages/user-manual/transfer-data/data-access-account.html) for more detail.
 
+If non-empty username and password are both provided, `repocli` will make WebDAV connection with the [BasicAuth](https://en.wikipedia.org/wiki/Basic_access_authentication) authentication.  When the username or password is an empty value, `repocli` will connect to WebDAV without any authentication.
+
 After providing those values, type `y` to save the credential to the configuration file.  Once it is done successfully, you can reuse the configuration file in the future to connect to the same WebDAV endpoint.
 
-💡You can use the `login` subcommand with the `-c` option to create multiple configuration files, each for a different WebDAV endpoint.
+💡You can use the `config` subcommand with the `-c` option to create multiple configuration files, each for a different WebDAV endpoint.
 
 ❗The password in the configuration file is encrypted with the signatures of the file path and the username.  Changes on the signatures (e.g. renaming the configuration file) will make the password invalid.
 
@@ -99,6 +102,8 @@ In the shell mode, the following additional operations are enabled:
 - lcd: change the present working directory at local
 - lpwd: show the present working directory at local
 - lls: list content in the present working directory at local
+- login: setup WebDAV client with BasicAuth authentication (option: save credential in `${HOME}/.repocli.yml`)
+- logout: setup WebDAV client with Empty authentication
 
 Hereafter are examples showcasing how to use various subcommands.  You can find more detailed and up-to-date usage via the `help` subcommand.  For example, the online help of the `get` subcommand can be found by:
 
