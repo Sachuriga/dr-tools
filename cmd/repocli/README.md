@@ -77,9 +77,11 @@ You will be asked to provide the WebDAV's baseURL, username and password.  For t
 
 ![screenshot of RDR data-access credential](screenshot-rdr-da-credential.png)
 
+If non-empty username and password are both provided, `repocli` will make WebDAV connection with the [BasicAuth](https://en.wikipedia.org/wiki/Basic_access_authentication) authentication.  When the username or password is an empty value, `repocli` will connect to WebDAV without any authentication.
+
 After providing those values, type `y` to save the credential to the configuration file.  Once it is done successfully, you can reuse the configuration file in the future to connect to the same WebDAV endpoint.
 
-💡You can use the `login` subcommand with the `-c` option to create multiple configuration files, each for a different WebDAV endpoint.
+💡You can use the `config` subcommand with the `-c` option to create multiple configuration files, each for a different WebDAV endpoint.
 
 ❗The password in the configuration file is encrypted with the signatures of the file path and the username.  Changes on the signatures (e.g. renaming the configuration file) will make the password invalid.
 
@@ -102,6 +104,8 @@ In the shell mode, the following additional operations are enabled:
 - lcd: change the present working directory at local
 - lpwd: show the present working directory at local
 - lls: list content in the present working directory at local
+- login: setup WebDAV client with BasicAuth authentication (option: save credential in `${HOME}/.repocli.yml`)
+- logout: setup WebDAV client with Empty authentication
 
 Hereafter are examples showcasing how to use various subcommands.  You can find more detailed and up-to-date usage via the `help` subcommand.  For example, the online help of the `get` subcommand can be found by:
 

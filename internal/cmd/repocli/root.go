@@ -81,7 +81,7 @@ func init() {
 	shellCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		shellMode = true
 		// enable subcommands that make sense in interactive shell
-		rootCmd.AddCommand(configCmd, cdCmd, pwdCmd, lcdCmd, lpwdCmd, llsCmd())
+		rootCmd.AddCommand(configCmd, loginCmd, logoutCmd, cdCmd, pwdCmd, lcdCmd, lpwdCmd, llsCmd())
 		return initDavClient(shellMode)
 	}
 	rootCmd.AddCommand(shellCmd)
@@ -110,6 +110,12 @@ func New() *cobra.Command {
 				cfg.ConsoleLevel = log.Info
 			}
 			log.NewLogger(cfg, log.InstanceLogrusLogger)
+
+			// skip initializing WebDAV Client for config command
+			if cmd.Use == configCmd.Use {
+				return nil
+			}
+
 			return initDavClient(!shellMode)
 		},
 	}
@@ -119,7 +125,7 @@ func New() *cobra.Command {
 	cmd.PersistentFlags().BoolVarP(&silent, "silent", "s", false, "set to slient mode (i.e. do not show progress)")
 
 	if shellMode {
-		cmd.AddCommand(cdCmd, pwdCmd, lcdCmd, lpwdCmd, llsCmd())
+		cmd.AddCommand(loginCmd, logoutCmd, cdCmd, pwdCmd, lcdCmd, lpwdCmd, llsCmd())
 	}
 
 	cmd.AddCommand(versionCmd, lsCmd(), putCmd(), getCmd(), mgetCmd(), mputCmd(), rmCmd(), mvCmd(), cpCmd(), mkdirCmd, configCmd)
@@ -129,28 +135,45 @@ func New() *cobra.Command {
 
 // initDavClient initialize the DavClient instance
 func initDavClient(prompt bool) error {
-	c, err := config.LoadConfig(configFile)
 
-	switch {
-	case err != nil && !prompt:
-		return err
-	case err != nil && prompt:
-		log.Warnf("configuration file not found: %s", configFile)
-		return promptConfig(true)
-	default:
-		repoCfg := c.Repository
-
-		repoUser := repoCfg.Username
-		repoPass, _ := decryptPass(repoUser, repoCfg.Password)
-		baseURL := repoCfg.BaseURL
-
-		if cli == nil || (baseURL != "" && baseURL != davBaseURL) {
-			// initiate a new webdav client with new baseURL
-			davBaseURL = baseURL
-			cli = dav.NewClient(baseURL, repoUser, repoPass)
-		}
-		return nil
+	cfg, err := filepath.Abs(configFile)
+	if err != nil {
+		return fmt.Errorf("cannot resolve config path: %s", configFile)
 	}
+	_, err = os.Stat(cfg)
+	if os.IsNotExist(err) {
+		if !prompt {
+			log.Warnf("configuration file doesn't exist: %s, run `repocli config` first", configFile)
+			return err
+		}
+		return promptConfig(true)
+	}
+
+	// load configuration file when it exists
+	c, err := config.LoadConfig(configFile)
+	if err != nil {
+		return err
+	}
+
+	repoCfg := c.Repository
+	repoUser := repoCfg.Username
+	repoPass, _ := decryptPass(repoUser, repoCfg.Password)
+	baseURL := repoCfg.BaseURL
+
+	if cli == nil || (baseURL != "" && baseURL != davBaseURL) {
+		davBaseURL = baseURL
+		cli = newDavClient(davBaseURL, repoUser, repoPass)
+	}
+	return nil
+}
+
+func newDavClient(url, username, password string) *dav.Client {
+	if username == "" || password == "" {
+		log.Debugf("connect to %s with Empty authentication", url)
+		return dav.NewAuthClient(url, dav.NewEmptyAuth())
+	}
+	log.Debugf("connect to %s with with BasicAuth authentication", url)
+	return dav.NewAuthClient(url, dav.NewPreemptiveAuth(&BasicAuth{user: username, pw: password}))
 }
 
 // versionCmd prints out the version number of the package.

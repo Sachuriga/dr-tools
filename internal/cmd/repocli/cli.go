@@ -64,6 +64,7 @@ var mgetStrip string
 var mputDir string
 var mputStrip string
 var parents bool
+var nologin bool = false
 
 // command to list a file or the content of a directory in the repository.
 func lsCmd() *cobra.Command {
@@ -77,6 +78,8 @@ The "ls" subcommand is for listing a repository file or the content of a reposit
 The optional argument is used to specify the file or directory in the repository to be listed. The argument can be in form of an absolute or relative WebDAV path with the path separator "/", for example, "/dccn/DAC_3010000.01_173/data".
 
 If no argument is provided, it lists the content of the root ("/") WebDAV path.
+
+By default, it combines Radboud Data Repository WebDAV login to list both public and restricted data collections.  Use the option "--public" for listing only the public Radboud Data Repository collections, 
 		`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -156,6 +159,7 @@ If no argument is provided, it lists the content of the root ("/") WebDAV path.
 	}
 
 	cmd.Flags().BoolVarP(&longformat, "long", "l", false, "list files with more detail")
+	cmd.Flags().BoolVarP(&nologin, "public", "", nologin, "list only the public Radboud Data Repository collections")
 
 	return cmd
 }
