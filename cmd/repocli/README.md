@@ -73,7 +73,7 @@ The credential (username and password) of the data-access account should be prov
 $ repocli config
 ```
 
-You will be asked to provide the WebDAV's baseURL, username and password.  For the Donders Repository users, the baseURL is `https://webdav.data.donders.ru.nl`.  The username and password are your data-access account credential, see [here](https://data.donders.ru.nl/doc/help/helppages/user-manual/transfer-data/data-access-account.html) for more detail.
+You will be asked to provide the WebDAV's baseURL, username and password.  For the Donders Repository users, the baseURL is `https://webdav.data.ru.nl`.  The username and password are your data-access account credential.
 
 If non-empty username and password are both provided, `repocli` will make WebDAV connection with the [BasicAuth](https://en.wikipedia.org/wiki/Basic_access_authentication) authentication.  When the username or password is an empty value, `repocli` will connect to WebDAV without any authentication.
 
