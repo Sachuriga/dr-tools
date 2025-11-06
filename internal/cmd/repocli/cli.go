@@ -64,43 +64,7 @@ var mgetStrip string
 var mputDir string
 var mputStrip string
 var parents bool
-var stdlogin bool = false
 var nologin bool = false
-
-// command to login webdav
-func loginCmd() *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "login [<repo_file|repo_dir>]",
-		Short: "validate the WebDAV credential",
-		Long: `
-The "login" subcommand tests if the provided credential is a valid one.
-
-By default, it checks credential with a Radboud Data Repository specific mechanism.  Use "--standard" option for the standard WebDAV credential check (i.e. via the HTTP "OPTIONS" request).
-		`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, args []string) error {
-
-			var err error
-
-			if !stdlogin {
-				_, err = cli.Stat("/.login")
-			} else {
-				err = cli.Connect()
-			}
-
-			if err != nil {
-				return fmt.Errorf("login failed: %s", err)
-			}
-
-			log.Infof("success")
-			return nil
-		},
-	}
-
-	cmd.Flags().BoolVarP(&stdlogin, "standard", "", stdlogin, "apply standard WebDAV login")
-
-	return cmd
-}
 
 // command to list a file or the content of a directory in the repository.
 func lsCmd() *cobra.Command {

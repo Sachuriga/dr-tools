@@ -16,10 +16,37 @@ import (
 	ustr "github.com/Donders-Institute/tg-toolset-golang/pkg/strings"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	dav "github.com/studio-b12/gowebdav"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v2"
 )
+
+// command to login webdav interactively
+var loginCmd = &cobra.Command{
+	Use:   "login",
+	Short: "setup WebDAV client with BasicAuth authentication",
+	Long: `
+The "login" subcommand configures the WebDAV client to use username/password for BasicAuth authentication.
+		`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		promptConfig(false)
+		return nil
+	},
+}
+
+// command to logout webdav interactively
+var logoutCmd = &cobra.Command{
+	Use:   "logout",
+	Short: "setup WebDAV client with Empty authentication",
+	Long: `
+The "logout" subcommand configures the WebDAV client for Empty credential.
+		`,
+	Args: cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		cli = newDavClient(davBaseURL, "", "")
+		return nil
+	},
+}
 
 // command to change directory in the repository.
 // This command only makes sense in shell mode.
@@ -258,7 +285,7 @@ func promptConfig(saveCredential bool) error {
 	}
 
 	// try to connect the repo webdav to check authentication
-	cli = dav.NewClient(davBaseURL, repoUser, repoPass)
+	cli = newDavClient(davBaseURL, repoUser, repoPass)
 
 	// save to configuration file `configFile`
 	return saveConfig(davBaseURL, repoUser, repoPass, saveCredential)
@@ -336,14 +363,9 @@ func stringPrompt(label string) string {
 // passwordPrompt asks for a password value using the label
 func passwordPrompt(label string) string {
 	var s string
-	for {
-		fmt.Fprint(os.Stderr, label+": ")
-		b, _ := term.ReadPassword(int(syscall.Stdin))
-		s = string(b)
-		if s != "" {
-			break
-		}
-	}
+	fmt.Fprint(os.Stderr, label+": ")
+	b, _ := term.ReadPassword(int(syscall.Stdin))
+	s = string(b)
 	fmt.Println()
 	return s
 }

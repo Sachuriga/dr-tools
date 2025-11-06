@@ -81,7 +81,7 @@ func init() {
 	shellCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		shellMode = true
 		// enable subcommands that make sense in interactive shell
-		rootCmd.AddCommand(configCmd, cdCmd, pwdCmd, lcdCmd, lpwdCmd, llsCmd())
+		rootCmd.AddCommand(configCmd, loginCmd, logoutCmd, cdCmd, pwdCmd, lcdCmd, lpwdCmd, llsCmd())
 		return initDavClient(shellMode)
 	}
 	rootCmd.AddCommand(shellCmd)
@@ -110,6 +110,12 @@ func New() *cobra.Command {
 				cfg.ConsoleLevel = log.Info
 			}
 			log.NewLogger(cfg, log.InstanceLogrusLogger)
+
+			// skip initializing WebDAV Client for config command
+			if cmd.Use == configCmd.Use {
+				return nil
+			}
+
 			return initDavClient(!shellMode)
 		},
 	}
@@ -119,10 +125,10 @@ func New() *cobra.Command {
 	cmd.PersistentFlags().BoolVarP(&silent, "silent", "s", false, "set to slient mode (i.e. do not show progress)")
 
 	if shellMode {
-		cmd.AddCommand(cdCmd, pwdCmd, lcdCmd, lpwdCmd, llsCmd())
+		cmd.AddCommand(loginCmd, logoutCmd, cdCmd, pwdCmd, lcdCmd, lpwdCmd, llsCmd())
 	}
 
-	cmd.AddCommand(versionCmd, loginCmd(), lsCmd(), putCmd(), getCmd(), mgetCmd(), mputCmd(), rmCmd(), mvCmd(), cpCmd(), mkdirCmd, configCmd)
+	cmd.AddCommand(versionCmd, lsCmd(), putCmd(), getCmd(), mgetCmd(), mputCmd(), rmCmd(), mvCmd(), cpCmd(), mkdirCmd, configCmd)
 
 	return cmd
 }
@@ -140,7 +146,6 @@ func initDavClient(prompt bool) error {
 			log.Warnf("configuration file doesn't exist: %s, run `repocli config` first", configFile)
 			return err
 		}
-		log.Infof("setting up client configuration file: %s", configFile)
 		return promptConfig(true)
 	}
 
@@ -156,11 +161,19 @@ func initDavClient(prompt bool) error {
 	baseURL := repoCfg.BaseURL
 
 	if cli == nil || (baseURL != "" && baseURL != davBaseURL) {
-		// initiate a new webdav client with new baseURL
 		davBaseURL = baseURL
-		cli = dav.NewAuthClient(davBaseURL, dav.NewPreemptiveAuth(&BasicAuth{user: repoUser, pw: repoPass}))
+		cli = newDavClient(davBaseURL, repoUser, repoPass)
 	}
 	return nil
+}
+
+func newDavClient(url, username, password string) *dav.Client {
+	if username == "" || password == "" {
+		log.Debugf("connect to %s with Empty authentication", url)
+		return dav.NewAuthClient(url, dav.NewEmptyAuth())
+	}
+	log.Debugf("connect to %s with with BasicAuth authentication", url)
+	return dav.NewAuthClient(url, dav.NewPreemptiveAuth(&BasicAuth{user: username, pw: password}))
 }
 
 // versionCmd prints out the version number of the package.
