@@ -279,8 +279,12 @@ function Invoke-Repocli {
         # Running it in this console rather than through Start-Process also means
         # Ctrl+C reaches repocli, instead of merely ending the wait and leaving it
         # uploading in the background. PowerShell quotes the arguments itself, so
-        # paths containing spaces need no help here.
-        & $script:RepocliPath @Arguments
+        # paths containing spaces need no help here. Out-Host keeps stdout off
+        # this function's output stream -- whatever a function writes there
+        # becomes part of its return value, and the exit code would come back as
+        # an array. Only stdout is piped; the bar is on stderr and still reaches
+        # the console untouched.
+        & $script:RepocliPath @Arguments | Out-Host
         if ($null -eq $LASTEXITCODE) { return 0 }
         return [int]$LASTEXITCODE
     }

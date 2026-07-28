@@ -1426,13 +1426,23 @@ func startByteProgress(bar *pb.ProgressBar, verb string) func() {
 	go func() {
 		t := time.NewTicker(time.Second)
 		defer t.Stop()
+
+		// The description decides how much room is left for the bar itself, so
+		// one that changes length makes the whole line re-layout and flicker on
+		// every redraw. A fixed-width figure with no decimal holds still: the
+		// fraction of a megabyte carries nothing at this scale anyway.
+		last := int64(-1)
 		for {
 			select {
 			case <-done:
 				return
 			case <-t.C:
-				mb := float64(atomic.LoadInt64(&uploadedBytes)) / (1024 * 1024)
-				bar.Describe(fmt.Sprintf("%-20s", fmt.Sprintf("%s %.1f MB", verb, mb)))
+				mb := atomic.LoadInt64(&uploadedBytes) / (1024 * 1024)
+				if mb == last {
+					continue
+				}
+				last = mb
+				bar.Describe(fmt.Sprintf("%s %8d MB", verb, mb))
 			}
 		}
 	}()
