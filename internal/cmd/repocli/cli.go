@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -1214,6 +1215,12 @@ func getCleanRepoPath(p string) string {
 // channel `ichan`.
 func runOp(ctx context.Context, op Op, ichan chan opInput, nworkers int, pbar *pb.ProgressBar) (cntOk, cntErr int) {
 
+	if op == Put {
+		// per-second megabyte readout, since the bar's own byte count stops
+		// showing decimals past 10 GB
+		defer startByteProgress(pbar, "uploading")()
+	}
+
 	// error log writer
 	errWriter := os.Stderr
 	if errfile != "" {
@@ -1387,6 +1394,52 @@ loop:
 	}
 }
 
+// uploadedBytes counts the bytes accounted for by the transfer in progress,
+// skipped files included, so that it stays in step with the bar's own counter.
+// The bar renders that counter through the library's humanizeBytes, which drops
+// the decimal once the value passes 10 of a unit, so past 10 GB the displayed
+// number only moves once per gigabyte. This counter drives a megabyte readout
+// in the bar description instead.
+var uploadedBytes int64
+
+// countSkipped accounts for a file that was not sent because the repository
+// already holds it. Both totals were sized against every file found, so a skip
+// still has to advance them or they never reach completion on a resumed run.
+func countSkipped(pbar *pb.ProgressBar, size int64) {
+	if pbar == nil {
+		return
+	}
+	pbar.Add64(size)
+	atomic.AddInt64(&uploadedBytes, size)
+}
+
+// startByteProgress rewrites the bar's description once a second with the
+// megabytes transferred so far, and returns a function that stops it.
+func startByteProgress(bar *pb.ProgressBar, verb string) func() {
+	atomic.StoreInt64(&uploadedBytes, 0)
+
+	if silent || bar == nil {
+		return func() {}
+	}
+
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(time.Second)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+				mb := float64(atomic.LoadInt64(&uploadedBytes)) / (1024 * 1024)
+				bar.Describe(fmt.Sprintf("%-20s", fmt.Sprintf("%s %.1f MB", verb, mb)))
+			}
+		}
+	}()
+
+	return func() { close(done) }
+}
+
 // progressWriter reports bytes to progress bars as they stream past. It also
 // remembers how much it has reported, so that a failed attempt can be taken
 // back before the retry re-sends the file from the beginning.
@@ -1400,6 +1453,7 @@ func (w *progressWriter) Write(p []byte) (int, error) {
 		b.Add(len(p))
 	}
 	w.n += int64(len(p))
+	atomic.AddInt64(&uploadedBytes, int64(len(p)))
 	return len(p), nil
 }
 
@@ -1407,6 +1461,7 @@ func (w *progressWriter) rollback() {
 	for _, b := range w.bars {
 		b.Add64(-w.n)
 	}
+	atomic.AddInt64(&uploadedBytes, -w.n)
 	w.n = 0
 }
 
@@ -1436,9 +1491,7 @@ func putRepoFile(pfinfoLocal, pfinfoRepo pathFileInfo, showProgress bool, pbar *
 			// fail to stat remote path, but the failure is no `file not found`.
 			if err != nil {
 				log.Debugf("skip file fail to check signature: %s\n", pfinfoRepo.path)
-				if pbar != nil {
-					pbar.Add64(ltsize)
-				}
+				countSkipped(pbar, ltsize)
 				return nil
 			}
 
@@ -1450,9 +1503,7 @@ func putRepoFile(pfinfoLocal, pfinfoRepo pathFileInfo, showProgress bool, pbar *
 
 			if hasSameSize && isRepoNewer {
 				log.Debugf("skip file with same signature (size + modtime): %s\n", pfinfoRepo.path)
-				if pbar != nil {
-					pbar.Add64(ltsize)
-				}
+				countSkipped(pbar, ltsize)
 				return nil
 			}
 		}
