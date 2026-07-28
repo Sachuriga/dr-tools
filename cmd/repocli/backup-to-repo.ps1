@@ -24,10 +24,18 @@
     Local root to back up, e.g. E:\ or E:\projectdata.
 
 .PARAMETER Dest
-    Destination directory in the repository. With the documented setup
-    (baseURL = https://webdav.data.ru.nl) this is the collection path, e.g.
-    /dcn.DSC_626830_0003_227.  If you configured the full collection URL as the
-    baseURL instead, use -Dest /.
+    Destination directory in the repository, relative to -Root.  If the baseURL
+    in .repocli.yml is the full collection URL (i.e. `repocli ls /` already
+    lists the collection content), this is just the path inside the collection,
+    e.g. HM_neurons.  If the baseURL is only https://webdav.data.ru.nl, name the
+    collection too, e.g. dcn.DSC_626830_0003_227/HM_neurons.
+
+.PARAMETER Root
+    Root folder in the repository that everything is placed under; -Dest is
+    appended to it.  Use it to keep one source drive in its own subtree, named
+    after the drive, e.g. -Root GL34.  Pass -Root '' to upload straight to
+    -Dest.  The recorded state is per root+destination, so pointing an already
+    finished backup at a new root uploads it again rather than skipping it.
 
 .PARAMETER Depth
     How deep to split the tree into upload units. 1 = one unit per top-level
@@ -47,20 +55,23 @@
     Show the units that would be uploaded and exit.
 
 .PARAMETER ShowProgress
-    Let repocli draw its own progress bar on the console instead of running it
-    in silent mode. Output is not written to the per-unit log in this mode.
+    Let repocli draw its own per-file progress bar on the console instead of
+    running it in silent mode.  Nothing is written to the per-unit log in this
+    mode, so a failed file can then only be found through the error file.  The
+    overall unit-by-unit bar is drawn either way.
 
 .EXAMPLE
-    .\backup-to-repo.ps1 -Source E:\projectdata -Dest /dcn.DSC_626830_0003_227
+    # uploads to /GL34/HM_neurons, one unit per <rat>\<date> folder
+    .\backup-to-repo.ps1 -Source E:\HM_neurons -Dest HM_neurons -Depth 2
 
 .EXAMPLE
     # preview the split first
-    .\backup-to-repo.ps1 -Source E:\projectdata -Dest /dcn.DSC_626830_0003_227 -ListOnly
+    .\backup-to-repo.ps1 -Source E:\HM_neurons -Dest HM_neurons -Depth 2 -ListOnly
 
 .EXAMPLE
-    # split one huge top-level folder deeper, and only do that folder
-    .\backup-to-repo.ps1 -Source E:\projectdata -Dest /dcn.DSC_626830_0003_227 `
-        -Depth 2 -Include 'rawdata*'
+    # one rat at a time, from a second drive into its own root
+    .\backup-to-repo.ps1 -Source F:\HM_neurons -Dest HM_neurons -Root GL35 `
+        -Depth 2 -Include 'Rat1_487555*'
 
 .NOTES
     Prerequisites:
@@ -79,6 +90,8 @@ param(
 
     [Parameter(Mandatory = $true)]
     [string]$Dest,
+
+    [string]$Root = 'GL34',
 
     [string]$Repocli = 'repocli.exe',
     [string]$Config = (Join-Path $env:USERPROFILE '.repocli.yml'),
@@ -134,13 +147,14 @@ function Join-RemotePath {
 }
 
 # Stable, filesystem-safe key for a unit: readable prefix + hash of the full
-# relative path, so two different folders can never share a state file.
+# relative path *and* where it is being sent, so neither two different folders
+# nor the same folder aimed at two different roots share a state file.
 function Get-UnitKey {
-    param([string]$Rel)
+    param([string]$Rel, [string]$Dest)
 
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try {
-        $bytes = [System.Text.Encoding]::UTF8.GetBytes($Rel)
+        $bytes = [System.Text.Encoding]::UTF8.GetBytes("$Dest|$Rel")
         $hash = ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }) -join ''
     }
     finally {
@@ -186,7 +200,7 @@ $script:SkipDirNames = @(
 function Add-Unit {
     param([hashtable]$Unit)
 
-    $Unit['Key'] = Get-UnitKey -Rel $Unit['Rel']
+    $Unit['Key'] = Get-UnitKey -Rel $Unit['Rel'] -Dest $Unit['DestArg']
     [void]$script:Units.Add([pscustomobject]$Unit)
 }
 
@@ -387,7 +401,10 @@ if (-not (Test-Path -LiteralPath $Config)) {
     throw "repocli configuration not found: $Config. Run 'repocli config' first."
 }
 
-$Dest = '/' + $Dest.Trim('/')
+# Everything lands under one root folder, so backing up a second drive is a
+# matter of changing -Root rather than every -Dest.
+$segments = @($Root, $Dest) | ForEach-Object { $_.Trim('/') } | Where-Object { $_ }
+$Dest = '/' + ($segments -join '/')
 
 $stateDir = Join-Path $WorkDir 'state'
 $logDir = Join-Path $WorkDir 'logs'
@@ -471,10 +488,27 @@ $stats = [pscustomobject]@{
 $failedUnits = New-Object System.Collections.ArrayList
 $runStart = Get-Date
 $index = 0
+$activity = "backup to $Dest"
 
 try {
     foreach ($unit in $script:Units) {
         $index++
+
+        # Overall progress. Write-Progress draws in the host's own progress area
+        # instead of on stdout/stderr, so it shows in both modes: repocli writes
+        # its per-file bar to stderr with carriage returns, which the pipeline
+        # this script normally reads it through would shred into log lines.
+        $progress = @{
+            Activity        = $activity
+            Status          = "[$index/$total] $($unit.Rel)"
+            PercentComplete = [int](100 * ($index - 1) / $total)
+        }
+        if ($stats.Done -gt 0) {
+            $perUnit = ((Get-Date) - $runStart).TotalSeconds / $stats.Done
+            $progress['SecondsRemaining'] = [int]($perUnit * ($total - $index + 1))
+        }
+        Write-Progress @progress
+
         $stateFile = Join-Path $stateDir "$($unit.Key).done"
         $lockFile = Join-Path $stateDir "$($unit.Key).lock"
         $logFile = Join-Path $logDir "$($unit.Key).log"
@@ -560,6 +594,8 @@ try {
     }
 }
 finally {
+    Write-Progress -Activity $activity -Completed
+
     $runElapsed = (Get-Date) - $runStart
     Write-Log '---------------------------------------------------------------'
     Write-Log ("finished in {0:d\.hh\:mm\:ss}" -f $runElapsed)
