@@ -1931,7 +1931,13 @@ func initDynamicMaxProgressbar(desc string, showBytes bool) *pb.ProgressBar {
 		pb.OptionSetWriter(os.Stderr),
 		pb.OptionShowBytes(showBytes),
 		pb.OptionSetWidth(10),
-		pb.OptionThrottle(65*time.Millisecond),
+		// Without ANSI codes the library clears the line by painting it with
+		// spaces before redrawing it, which reads as a flicker now that a
+		// transfer redraws several times a second rather than once per finished
+		// file. "\033[2K\r" erases in one sequence. The slower throttle cuts the
+		// redraws further; the byte figure still moves faster than it is read.
+		pb.OptionUseANSICodes(true),
+		pb.OptionThrottle(200*time.Millisecond),
 		pb.OptionShowCount(),
 		pb.OptionOnCompletion(func() {
 			fmt.Printf("\n")
