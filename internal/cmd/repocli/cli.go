@@ -1465,6 +1465,33 @@ func (w *progressWriter) rollback() {
 	w.n = 0
 }
 
+// progressReader streams the local file while reporting transferred bytes.
+// It keeps the file's io.Seeker interface exposed, so the WebDAV client
+// streams straight from disk instead of copying the whole file into an
+// in-memory retry buffer (gowebdav buffers any non-seekable body).
+// A Seek back to the start means the body is being re-sent; the bytes
+// reported so far are taken back then.
+type progressReader struct {
+	f  *os.File
+	pw *progressWriter
+}
+
+func (r *progressReader) Read(p []byte) (int, error) {
+	n, err := r.f.Read(p)
+	if n > 0 {
+		r.pw.Write(p[:n])
+	}
+	return n, err
+}
+
+func (r *progressReader) Seek(offset int64, whence int) (int64, error) {
+	pos, err := r.f.Seek(offset, whence)
+	if err == nil && pos == 0 {
+		r.pw.rollback()
+	}
+	return pos, err
+}
+
 // putRepoFile uploads a single local file to the repository. A non-nil pbar is
 // the caller's overall progress bar; putRepoFile accounts this file's bytes to
 // it, including when the file is skipped, so the caller must not count them
@@ -1533,7 +1560,7 @@ func putRepoFile(pfinfoLocal, pfinfoRepo pathFileInfo, showProgress bool, pbar *
 		}
 
 		// read pathRepo and write to pathLocal, the mode is not actually useful (!?)
-		err = cli.WriteStream(pfinfoRepo.path, io.TeeReader(reader, pw), pfinfoLocal.info.Mode())
+		err = cli.WriteStream(pfinfoRepo.path, &progressReader{f: reader, pw: pw}, pfinfoLocal.info.Mode())
 		if err != nil {
 			pw.rollback()
 			return fmt.Errorf("cannot write %s to the repository: %s", pfinfoRepo.path, err)
