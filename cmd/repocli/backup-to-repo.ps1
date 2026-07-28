@@ -268,36 +268,21 @@ function Find-Units {
 # repocli invocation
 #--------------------------------------------------------------------------
 
-# Windows command-line quoting. Start-Process -ArgumentList in Windows
-# PowerShell joins array elements with spaces and does NOT quote them, so paths
-# containing spaces have to be quoted here.
-function ConvertTo-ArgumentString {
-    param([string[]]$Arguments)
-
-    $quoted = foreach ($a in $Arguments) {
-        if ($a -match '[\s"]') {
-            '"' + ($a -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"'
-        }
-        else {
-            $a
-        }
-    }
-    return ($quoted -join ' ')
-}
-
 function Invoke-Repocli {
     param([string[]]$Arguments, [string]$LogFile)
 
     Write-Verbose ("running: {0} {1}" -f $script:RepocliPath, ($Arguments -join ' '))
 
     if ($ShowProgress) {
-        # Run attached to the console so repocli can draw its progress bar; going
-        # through the pipeline would buffer the carriage-return updates.
-        $p = Start-Process -FilePath $script:RepocliPath `
-                           -ArgumentList (ConvertTo-ArgumentString $Arguments) `
-                           -NoNewWindow -Wait -PassThru
-        $p.WaitForExit()
-        return [int]$p.ExitCode
+        # Call repocli straight, with no pipeline: it redraws its bar with
+        # carriage returns, which a pipeline would turn into one line per update.
+        # Running it in this console rather than through Start-Process also means
+        # Ctrl+C reaches repocli, instead of merely ending the wait and leaving it
+        # uploading in the background. PowerShell quotes the arguments itself, so
+        # paths containing spaces need no help here.
+        & $script:RepocliPath @Arguments
+        if ($null -eq $LASTEXITCODE) { return 0 }
+        return [int]$LASTEXITCODE
     }
 
     # Write-Host (not the pipeline) so repocli's output stays visible live
