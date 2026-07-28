@@ -278,7 +278,7 @@ By default, the upload process will skip existing files already in the repositor
 				pfinfoRepo := pathFileInfo{
 					path: p,
 				}
-				return putRepoFile(pfinfoLocal, pfinfoRepo, true)
+				return putRepoFile(pfinfoLocal, pfinfoRepo, true, nil)
 			}
 		},
 		ValidArgsFunction: func(_ *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
@@ -1247,8 +1247,10 @@ func runOp(ctx context.Context, op Op, ichan chan opInput, nworkers int, pbar *p
 					pinc := int64(1) // progress increment
 					switch op {
 					case Put:
-						err = putRepoFile(inputs.src, inputs.dst, false)
-						pinc = inputs.src.info.Size()
+						// putRepoFile feeds pbar as it streams, so this file's
+						// bytes are already accounted for.
+						err = putRepoFile(inputs.src, inputs.dst, false, pbar)
+						pinc = 0
 					case Get:
 						err = getRepoFile(inputs.src, inputs.dst, false)
 						pinc = inputs.src.info.Size()
@@ -1385,8 +1387,34 @@ loop:
 	}
 }
 
-// putRepoFile uploads a single local file to the repository.
-func putRepoFile(pfinfoLocal, pfinfoRepo pathFileInfo, showProgress bool) error {
+// progressWriter reports bytes to progress bars as they stream past. It also
+// remembers how much it has reported, so that a failed attempt can be taken
+// back before the retry re-sends the file from the beginning.
+type progressWriter struct {
+	bars []*pb.ProgressBar
+	n    int64
+}
+
+func (w *progressWriter) Write(p []byte) (int, error) {
+	for _, b := range w.bars {
+		b.Add(len(p))
+	}
+	w.n += int64(len(p))
+	return len(p), nil
+}
+
+func (w *progressWriter) rollback() {
+	for _, b := range w.bars {
+		b.Add64(-w.n)
+	}
+	w.n = 0
+}
+
+// putRepoFile uploads a single local file to the repository. A non-nil pbar is
+// the caller's overall progress bar; putRepoFile accounts this file's bytes to
+// it, including when the file is skipped, so the caller must not count them
+// a second time.
+func putRepoFile(pfinfoLocal, pfinfoRepo pathFileInfo, showProgress bool, pbar *pb.ProgressBar) error {
 
 	// determine local file size and modification time
 	ltsize := pfinfoLocal.info.Size()
@@ -1408,6 +1436,9 @@ func putRepoFile(pfinfoLocal, pfinfoRepo pathFileInfo, showProgress bool) error 
 			// fail to stat remote path, but the failure is no `file not found`.
 			if err != nil {
 				log.Debugf("skip file fail to check signature: %s\n", pfinfoRepo.path)
+				if pbar != nil {
+					pbar.Add64(ltsize)
+				}
 				return nil
 			}
 
@@ -1419,6 +1450,9 @@ func putRepoFile(pfinfoLocal, pfinfoRepo pathFileInfo, showProgress bool) error 
 
 			if hasSameSize && isRepoNewer {
 				log.Debugf("skip file with same signature (size + modtime): %s\n", pfinfoRepo.path)
+				if pbar != nil {
+					pbar.Add64(ltsize)
+				}
 				return nil
 			}
 		}
@@ -1439,24 +1473,32 @@ func putRepoFile(pfinfoLocal, pfinfoRepo pathFileInfo, showProgress bool) error 
 		}
 		defer reader.Close()
 
+		// Count the bytes as the request body is read, so that a multi-GB file
+		// moves the bars while it transfers instead of in a single jump once it
+		// is done.
+		pw := &progressWriter{bars: []*pb.ProgressBar{bar}}
+		if pbar != nil {
+			pw.bars = append(pw.bars, pbar)
+		}
+
 		// read pathRepo and write to pathLocal, the mode is not actually useful (!?)
-		err = cli.WriteStream(pfinfoRepo.path, reader, pfinfoLocal.info.Mode())
+		err = cli.WriteStream(pfinfoRepo.path, io.TeeReader(reader, pw), pfinfoLocal.info.Mode())
 		if err != nil {
+			pw.rollback()
 			return fmt.Errorf("cannot write %s to the repository: %s", pfinfoRepo.path, err)
 		}
 
 		// file size check after upload
 		f, err := cli.Stat(pfinfoRepo.path)
 		if err != nil {
+			pw.rollback()
 			return fmt.Errorf("cannot stat %s at the repository: %s", pfinfoRepo.path, err)
 		}
 
 		if f.Size() != ltsize {
+			pw.rollback()
 			return fmt.Errorf("file size %s mis-match: %d != %d", pfinfoRepo.path, f.Size(), ltsize)
 		}
-
-		// TODO: this jumps from 0% to 100% ... not ideal but there is no way with to get upload progression with the webdav client library
-		bar.Add64(f.Size())
 
 		return nil
 	}
