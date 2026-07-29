@@ -31,11 +31,13 @@
     collection too, e.g. dcn.DSC_626830_0003_227/HM_neurons.
 
 .PARAMETER Root
-    Root folder in the repository that everything is placed under; -Dest is
-    appended to it.  Use it to keep one source drive in its own subtree, named
-    after the drive, e.g. -Root GL34.  Pass -Root '' to upload straight to
-    -Dest.  The recorded state is per root+destination, so pointing an already
-    finished backup at a new root uploads it again rather than skipping it.
+    Optional folder in the repository to place -Dest under.  Empty by default,
+    so a destination stands on its own and a dataset lands in the same place
+    whichever drive it was read from -- the repository mirrors the experiment,
+    not the disks it happens to be spread over.  Set it only to park a copy
+    away from the main tree, e.g. -Root scratch.  The recorded state is per
+    root+destination, so aiming a finished backup at a different root makes the
+    next run re-check every file instead of skipping it.
 
 .PARAMETER Depth
     How deep to split the tree into upload units. 1 = one unit per top-level
@@ -61,7 +63,7 @@
     overall unit-by-unit bar is drawn either way.
 
 .EXAMPLE
-    # uploads to /GL34/HM_neurons, one unit per <rat>\<date> folder
+    # uploads to /HM_neurons, one unit per <rat>\<date> folder
     .\backup-to-repo.ps1 -Source E:\HM_neurons -Dest HM_neurons -Depth 2
 
 .EXAMPLE
@@ -69,9 +71,9 @@
     .\backup-to-repo.ps1 -Source E:\HM_neurons -Dest HM_neurons -Depth 2 -ListOnly
 
 .EXAMPLE
-    # one rat at a time, from a second drive into its own root
-    .\backup-to-repo.ps1 -Source F:\HM_neurons -Dest HM_neurons -Root GL35 `
-        -Depth 2 -Include 'Rat1_487555*'
+    # a rat kept on another drive still lands beside the others
+    .\backup-to-repo.ps1 -Source F:\HM_neurons -Dest HM_neurons `
+        -Depth 2 -Include 'Rat7_491392*'
 
 .NOTES
     Prerequisites:
@@ -91,7 +93,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$Dest,
 
-    [string]$Root = 'GL34',
+    [string]$Root = '',
 
     [string]$Repocli = 'repocli.exe',
     [string]$Config = (Join-Path $env:USERPROFILE '.repocli.yml'),
