@@ -258,8 +258,8 @@ By default, the upload process will skip existing files already in the repositor
 					pbar.ChangeMax(pbar.GetMax() - 1)
 				}()
 
-				// perform data transfer with 4 concurrent workers
-				cntOk, cntErr := runOp(ctx, Put, ichan, 4, pbar)
+				// perform data transfer with nthreads concurrent workers
+				cntOk, cntErr := runOp(ctx, Put, ichan, nthreads, pbar)
 
 				// log statistics
 				if !silent {
@@ -405,8 +405,8 @@ By default, the download process will skip existing files already in the reposit
 					pbar.ChangeMax(pbar.GetMax() - 1)
 				}()
 
-				// perform data transfer with 4 concurrent workers
-				cntOk, cntErr := runOp(ctx, Get, ichan, 4, pbar)
+				// perform data transfer with nthreads concurrent workers
+				cntOk, cntErr := runOp(ctx, Get, ichan, nthreads, pbar)
 
 				// log statistics
 				if !silent {
@@ -531,8 +531,8 @@ The "--parents" flag can be combined with the "--strip" flag to strip a part on 
 			// running operations
 			go func() {
 
-				// perform data transfer with 4 concurrent workers
-				cntOk, cntErr := runOp(ctx, Get, ichan, 4, pbar)
+				// perform data transfer with nthreads concurrent workers
+				cntOk, cntErr := runOp(ctx, Get, ichan, nthreads, pbar)
 				// log statistics
 				if !silent {
 					log.Infof("no. succeeded: %d, no. failed: %d", cntOk, cntErr)
@@ -750,8 +750,8 @@ The "--parents" flag can be combined with the "--strip" flag to strip a part on 
 			// running operations
 			go func() {
 
-				// perform data transfer with 4 concurrent workers
-				cntOk, cntErr := runOp(ctx, Put, ichan, 4, pbar)
+				// perform data transfer with nthreads concurrent workers
+				cntOk, cntErr := runOp(ctx, Put, ichan, nthreads, pbar)
 				// log statistics
 				if !silent {
 					log.Infof("no. succeeded: %d, no. failed: %d", cntOk, cntErr)
@@ -1737,7 +1737,7 @@ func copyOrMoveRepoDir(ctx context.Context, op Op, src, dst pathFileInfo, pbar *
 
 	// initalize concurrent workers
 	var wg sync.WaitGroup
-	nworkers := 4
+	nworkers := nthreads
 	// counter for file deletion error by worker
 	cntErrFiles := make([]int, nworkers)
 	cntOkFiles := make([]int, nworkers)
@@ -1845,7 +1845,7 @@ func rmRepoDir(ctx context.Context, repoPath string, recursive bool, pbar *pb.Pr
 
 	// initalize concurrent workers
 	var wg sync.WaitGroup
-	nworkers := 4
+	nworkers := nthreads
 	// counter for file deletion error by worker
 	cntOkFiles := make([]int, nworkers)
 	cntErrFiles := make([]int, nworkers)

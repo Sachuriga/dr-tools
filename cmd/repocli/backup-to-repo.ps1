@@ -43,6 +43,12 @@
     How deep to split the tree into upload units. 1 = one unit per top-level
     sub-folder (default). Use 2 if a top-level folder is itself many TB.
 
+.PARAMETER Threads
+    Passed to repocli as -n: how many files are uploaded at the same time
+    within a unit.  Default 1: one file at a time, the safest setting against
+    WriteStream 405 errors from a busy server.  Raise it on a link that has
+    room to spare.
+
 .PARAMETER Attempts
     How many times the script retries a whole unit before giving up on it and
     moving to the next one.
@@ -80,9 +86,9 @@
       1. repocli.exe on PATH (or pass -Repocli C:\tools\repocli.exe)
       2. run `repocli config` once to store baseURL + data-access credentials
          in %USERPROFILE%\.repocli.yml
-    Throughput: repocli uses a fixed 4 parallel transfers per directory upload
-    (-n does not change this). To push harder, start 2-3 instances of this
-    script with different -Include filters; unit locking makes that safe.
+    Throughput: -Threads sets the parallel transfers per directory upload
+    (repocli -n). To push harder still, start 2-3 instances of this script
+    with different -Include filters; unit locking makes that safe.
 #>
 
 [CmdletBinding()]
@@ -101,7 +107,7 @@ param(
     [string]$WorkDir = (Join-Path $env:USERPROFILE 'repocli-backup'),
 
     [int]$Depth = 1,
-    [int]$Threads = 4,
+    [int]$Threads = 1,
     [int]$FileRetry = 3,
     [int]$Attempts = 3,
     [int]$RetryDelaySeconds = 60,

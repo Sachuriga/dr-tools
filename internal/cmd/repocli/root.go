@@ -111,6 +111,11 @@ func New() *cobra.Command {
 			}
 			log.NewLogger(cfg, log.InstanceLogrusLogger)
 
+			// zero or negative workers would leave the transfer queue unserved
+			if nthreads < 1 {
+				nthreads = 1
+			}
+
 			// skip initializing WebDAV Client for config command
 			if cmd.Use == configCmd.Use {
 				return nil
