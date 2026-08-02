@@ -3,9 +3,12 @@ package repocli
 import (
 	"encoding/hex"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"os/user"
 	"path/filepath"
+	"time"
 
 	"github.com/Donders-Institute/dr-tools/external/cobrashell"
 	"github.com/Donders-Institute/dr-tools/internal/cmd/version"
@@ -173,12 +176,34 @@ func initDavClient(prompt bool) error {
 }
 
 func newDavClient(url, username, password string) *dav.Client {
+	var c *dav.Client
 	if username == "" || password == "" {
 		log.Debugf("connect to %s with Empty authentication", url)
-		return dav.NewAuthClient(url, dav.NewEmptyAuth())
+		c = dav.NewAuthClient(url, dav.NewEmptyAuth())
+	} else {
+		log.Debugf("connect to %s with with BasicAuth authentication", url)
+		c = dav.NewAuthClient(url, dav.NewPreemptiveAuth(&BasicAuth{user: username, pw: password}))
 	}
-	log.Debugf("connect to %s with with BasicAuth authentication", url)
-	return dav.NewAuthClient(url, dav.NewPreemptiveAuth(&BasicAuth{user: username, pw: password}))
+
+	// The default transport has no timeouts at all, so a connection that dies
+	// silently blocks its transfer forever.  No overall request timeout here --
+	// uploading a very large file legitimately takes hours -- only limits on
+	// the phases that should never be slow.  ResponseHeaderTimeout starts
+	// counting after the request body is fully sent; the repository may still
+	// be finalizing a large upload then, hence the generous value.
+	c.SetTransport(&http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSHandshakeTimeout:   30 * time.Second,
+		ResponseHeaderTimeout: 15 * time.Minute,
+		ExpectContinueTimeout: 10 * time.Second,
+		IdleConnTimeout:       90 * time.Second,
+	})
+
+	return c
 }
 
 // versionCmd prints out the version number of the package.
