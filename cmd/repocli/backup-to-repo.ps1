@@ -49,7 +49,9 @@
     moving to the next one.
 
 .PARAMETER FileRetry
-    Passed to repocli as -r: per-file retries inside a unit.
+    Number of retries for each file. After a failed upload, the script removes
+    that exact remote file path before trying the file again. repocli's own
+    internal retry is disabled so cleanup always happens between attempts.
 
 .PARAMETER Redo
     Ignore the recorded state and re-run units that were already marked done.
@@ -101,6 +103,7 @@ param(
     [string]$WorkDir = (Join-Path $env:USERPROFILE 'repocli-backup'),
 
     [int]$Depth = 1,
+    [ValidateRange(0, 100)]
     [int]$FileRetry = 3,
     [int]$Attempts = 3,
     [int]$RetryDelaySeconds = 60,
@@ -301,6 +304,45 @@ function Invoke-Repocli {
     return [int]$LASTEXITCODE
 }
 
+function Invoke-SingleFileUpload {
+    param(
+        [string]$LocalFile,
+        [string]$RemoteFile,
+        [string]$LogFile,
+        [string]$ErrFile,
+        [string[]]$Common
+    )
+
+    for ($attempt = 0; $attempt -le $FileRetry; $attempt++) {
+        $attemptLabel = $attempt + 1
+        $totalAttempts = $FileRetry + 1
+        Write-Log "  check/upload file [$attemptLabel/$totalAttempts]: $LocalFile -> $RemoteFile"
+
+        # Script-managed retries are required here: repocli's internal retries
+        # cannot remove a partially visible remote object between PUT requests.
+        $cliArgs = @('put', $LocalFile, $RemoteFile, '-r', '0') + $Common
+        $code = Invoke-Repocli -Arguments $cliArgs -LogFile $LogFile
+        if ($code -eq 0) { return $true }
+
+        Write-Log "  upload failed; remove exact remote residue: $RemoteFile" 'WARN'
+        $removeCode = Invoke-Repocli `
+            -Arguments (@('rm', $RemoteFile) + $Common) `
+            -LogFile $LogFile
+        if ($removeCode -eq 0) {
+            Write-Log "  removed remote residue: $RemoteFile" 'WARN'
+        }
+        else {
+            # A failed rm commonly means the failed PUT never created a visible
+            # object. Continue because the next PUT can still succeed.
+            Write-Log "  no removable residue (rm exit $removeCode): $RemoteFile" 'WARN'
+        }
+    }
+
+    Write-Log "  failed after $($FileRetry + 1) attempt(s): $LocalFile" 'WARN'
+    Add-Content -LiteralPath $ErrFile -Value "$LocalFile error: upload failed after $($FileRetry + 1) attempt(s)" -Encoding UTF8
+    return $false
+}
+
 function Invoke-DirectoryOneFileAtATime {
     param(
         [string]$LocalDir,
@@ -355,16 +397,13 @@ function Invoke-DirectoryOneFileAtATime {
             }
 
             $remoteFile = Join-RemotePath $RemoteDir $item.Name
-            # A skipped existing file produces no repocli progress bar. Log it
-            # before the call so a slow remote signature check is still visible.
-            Write-Log "  check/upload file: $($item.FullName) -> $remoteFile"
-            $cliArgs = @('put', $item.FullName, $remoteFile, '-r', "$FileRetry") + $Common
-            $code = Invoke-Repocli -Arguments $cliArgs -LogFile $LogFile
-            if ($code -ne 0) {
-                Write-Log "  failed: $($item.FullName) (exit $code)" 'WARN'
-                Add-Content -LiteralPath $ErrFile -Value "$($item.FullName) error: exit $code" -Encoding UTF8
-                $ok = $false
-            }
+            $fileOk = Invoke-SingleFileUpload `
+                -LocalFile $item.FullName `
+                -RemoteFile $remoteFile `
+                -LogFile $LogFile `
+                -ErrFile $ErrFile `
+                -Common $Common
+            if (-not $fileOk) { $ok = $false }
         }
     }
     catch {
@@ -411,13 +450,15 @@ function Invoke-Unit {
 
     $ok = $true
     foreach ($f in $Unit.Files) {
-        $cliArgs = @('put', $f, $Unit.DestArg, '-r', "$FileRetry") + $common
-        $code = Invoke-Repocli -Arguments $cliArgs -LogFile $LogFile
-        if ($code -ne 0) {
-            Write-Log "  failed: $f (exit $code)" 'WARN'
-            Add-Content -LiteralPath $ErrFile -Value "$f error: exit $code" -Encoding UTF8
-            $ok = $false
-        }
+        $localName = Split-Path -Leaf $f
+        $remoteFile = Join-RemotePath $Unit.DestArg $localName
+        $fileOk = Invoke-SingleFileUpload `
+            -LocalFile $f `
+            -RemoteFile $remoteFile `
+            -LogFile $LogFile `
+            -ErrFile $ErrFile `
+            -Common $common
+        if (-not $fileOk) { $ok = $false }
     }
     return $ok
 }
