@@ -313,6 +313,7 @@ function Invoke-DirectoryOneFileAtATime {
     # Create directories separately so each put command can name one exact
     # source file and one exact destination file. This also preserves empty
     # directories without asking repocli to scan a local directory.
+    Write-Log "  ensure remote directory: $RemoteDir"
     $code = Invoke-Repocli -Arguments (@('mkdir', $RemoteDir) + $Common) -LogFile $LogFile
     if ($code -ne 0) {
         Write-Log "  mkdir $RemoteDir failed (exit $code)" 'WARN'
@@ -321,6 +322,7 @@ function Invoke-DirectoryOneFileAtATime {
     }
 
     $ok = $true
+    Write-Log "  scan local directory: $LocalDir"
     try {
         # EnumerateFileSystemEntries is lazy: the loop asks the filesystem for
         # the next entry only after the current file upload has completed.
@@ -353,6 +355,9 @@ function Invoke-DirectoryOneFileAtATime {
             }
 
             $remoteFile = Join-RemotePath $RemoteDir $item.Name
+            # A skipped existing file produces no repocli progress bar. Log it
+            # before the call so a slow remote signature check is still visible.
+            Write-Log "  check/upload file: $($item.FullName) -> $remoteFile"
             $cliArgs = @('put', $item.FullName, $remoteFile, '-r', "$FileRetry") + $Common
             $code = Invoke-Repocli -Arguments $cliArgs -LogFile $LogFile
             if ($code -ne 0) {
