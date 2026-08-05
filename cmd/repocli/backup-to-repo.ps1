@@ -10,15 +10,16 @@
     so an interrupted run (crash, reboot, network loss, Ctrl+C) can simply be
     started again: finished units are skipped and the rest continues.
 
-    Within a unit, `repocli put` itself skips files that already exist in the
-    repository with the same size and a newer modification time, so a re-run of
-    a partially uploaded unit only transfers what is missing.
+    Within a unit, the script discovers one filesystem entry at a time.  Each
+    file is passed to a separate `repocli put` process, and the next entry is
+    not examined until that upload finishes. `repocli put` skips a file that
+    already exists in the repository with the same size and a newer
+    modification time, so a re-run only transfers what is missing.
 
-    Success of a unit is checked with three signals, because `repocli put` on a
-    directory exits 0 even when individual files failed:
-      1. process exit code
-      2. the per-unit error file (-e) must be empty
-      3. the log must not contain "cannot create repo dir"
+    Success is checked after every single-file `repocli put`. Any failed file
+    makes its unit fail, while the script continues with the remaining files
+    so the next unit retry can skip completed files and retry only the missing
+    ones.
 
 .PARAMETER Source
     Local root to back up, e.g. E:\ or E:\projectdata.
@@ -300,47 +301,99 @@ function Invoke-Repocli {
     return [int]$LASTEXITCODE
 }
 
-function Test-UnitSucceeded {
-    param([int]$ExitCode, [string]$LogFile, [string]$ErrFile)
+function Invoke-DirectoryOneFileAtATime {
+    param(
+        [string]$LocalDir,
+        [string]$RemoteDir,
+        [string]$LogFile,
+        [string]$ErrFile,
+        [string[]]$Common
+    )
 
-    if ($ExitCode -ne 0) {
-        Write-Log "  exit code $ExitCode" 'WARN'
+    # Create directories separately so each put command can name one exact
+    # source file and one exact destination file. This also preserves empty
+    # directories without asking repocli to scan a local directory.
+    $code = Invoke-Repocli -Arguments (@('mkdir', $RemoteDir) + $Common) -LogFile $LogFile
+    if ($code -ne 0) {
+        Write-Log "  mkdir $RemoteDir failed (exit $code)" 'WARN'
+        Add-Content -LiteralPath $ErrFile -Value "$LocalDir error: cannot create $RemoteDir (exit $code)" -Encoding UTF8
         return $false
     }
 
-    if (Test-Path -LiteralPath $ErrFile) {
-        $len = (Get-Item -LiteralPath $ErrFile).Length
-        if ($len -gt 0) {
-            $first = (Get-Content -LiteralPath $ErrFile -TotalCount 3) -join '; '
-            Write-Log "  repocli reported file errors, see $ErrFile -> $first" 'WARN'
-            return $false
+    $ok = $true
+    try {
+        # EnumerateFileSystemEntries is lazy: the loop asks the filesystem for
+        # the next entry only after the current file upload has completed.
+        foreach ($entry in [System.IO.Directory]::EnumerateFileSystemEntries($LocalDir)) {
+            try {
+                $item = Get-Item -LiteralPath $entry -Force -ErrorAction Stop
+            }
+            catch {
+                Write-Log "  cannot inspect $entry : $($_.Exception.Message)" 'WARN'
+                Add-Content -LiteralPath $ErrFile -Value "$entry error: $($_.Exception.Message)" -Encoding UTF8
+                $ok = $false
+                continue
+            }
+
+            if ($item.PSIsContainer) {
+                if (($script:SkipDirNames -contains $item.Name) -or
+                    ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+                    Write-Log "  skip directory: $($item.FullName)" 'WARN'
+                    continue
+                }
+
+                $childOk = Invoke-DirectoryOneFileAtATime `
+                    -LocalDir $item.FullName `
+                    -RemoteDir (Join-RemotePath $RemoteDir $item.Name) `
+                    -LogFile $LogFile `
+                    -ErrFile $ErrFile `
+                    -Common $Common
+                if (-not $childOk) { $ok = $false }
+                continue
+            }
+
+            $remoteFile = Join-RemotePath $RemoteDir $item.Name
+            $cliArgs = @('put', $item.FullName, $remoteFile, '-r', "$FileRetry") + $Common
+            $code = Invoke-Repocli -Arguments $cliArgs -LogFile $LogFile
+            if ($code -ne 0) {
+                Write-Log "  failed: $($item.FullName) (exit $code)" 'WARN'
+                Add-Content -LiteralPath $ErrFile -Value "$($item.FullName) error: exit $code" -Encoding UTF8
+                $ok = $false
+            }
         }
     }
-
-    if ((-not $ShowProgress) -and (Test-Path -LiteralPath $LogFile)) {
-        $log = Get-Content -LiteralPath $LogFile -Raw
-        if ($log -and $log -match 'cannot create repo dir') {
-            Write-Log '  repocli could not create a remote directory' 'WARN'
-            return $false
-        }
+    catch {
+        Write-Log "  cannot scan $LocalDir : $($_.Exception.Message)" 'WARN'
+        Add-Content -LiteralPath $ErrFile -Value "$LocalDir error: $($_.Exception.Message)" -Encoding UTF8
+        $ok = $false
     }
 
-    return $true
+    return $ok
 }
 
 function Invoke-Unit {
     param([psobject]$Unit, [string]$LogFile, [string]$ErrFile)
 
-    # Keep uploads strictly serial even when a whole directory is passed to
-    # repocli: one worker consumes its recursive file queue one file at a time.
+    # Every put below names exactly one file. Keep repocli at one worker too,
+    # so the invariant remains explicit if its single-file behavior changes.
     $common = @('-c', $Config, '-n', '1')
     if ($Url) { $common += @('-u', $Url) }
     if (-not $ShowProgress) { $common += '-s' }
 
+    # Each whole-unit retry gets a fresh error report. A successful retry must
+    # not be rejected because the previous attempt left errors in this file.
+    Remove-Item -LiteralPath $ErrFile -Force -ErrorAction SilentlyContinue
+
     if ($Unit.Kind -eq 'dir') {
-        $cliArgs = @('put', $Unit.Local, $Unit.DestArg, '-r', "$FileRetry", '-e', $ErrFile) + $common
-        $code = Invoke-Repocli -Arguments $cliArgs -LogFile $LogFile
-        return (Test-UnitSucceeded -ExitCode $code -LogFile $LogFile -ErrFile $ErrFile)
+        $localRoot = $Unit.Local.TrimEnd([char[]]@('\', '/'))
+        $localName = Split-Path -Leaf $localRoot
+        $remoteRoot = Join-RemotePath $Unit.DestArg $localName
+        return (Invoke-DirectoryOneFileAtATime `
+            -LocalDir $localRoot `
+            -RemoteDir $remoteRoot `
+            -LogFile $LogFile `
+            -ErrFile $ErrFile `
+            -Common $common)
     }
 
     # 'files': make sure the destination directory exists, otherwise `put` of a
