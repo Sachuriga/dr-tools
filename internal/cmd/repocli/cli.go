@@ -21,6 +21,7 @@ import (
 	"github.com/Donders-Institute/tg-toolset-golang/pkg/logger"
 	log "github.com/Donders-Institute/tg-toolset-golang/pkg/logger"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	pb "github.com/schollz/progressbar/v3"
 )
@@ -1402,6 +1403,10 @@ loop:
 // in the bar description instead.
 var uploadedBytes int64
 
+// plainProgress is set when stderr is not an interactive terminal; the bar is
+// muted then and progress is reported as ordinary log lines instead.
+var plainProgress bool
+
 // countSkipped accounts for a file that was not sent because the repository
 // already holds it. Both totals were sized against every file found, so a skip
 // still has to advance them or they never reach completion on a resumed run.
@@ -1424,6 +1429,22 @@ func startByteProgress(bar *pb.ProgressBar, verb string) func() {
 
 	done := make(chan struct{})
 	go func() {
+		if plainProgress {
+			// One ordinary line per minute keeps a piped or redirected run
+			// readable; an unchanged figure still tells that the transfer
+			// has stalled.
+			t := time.NewTicker(time.Minute)
+			defer t.Stop()
+			for {
+				select {
+				case <-done:
+					return
+				case <-t.C:
+					log.Infof("%s %d MB", verb, atomic.LoadInt64(&uploadedBytes)/(1024*1024))
+				}
+			}
+		}
+
 		t := time.NewTicker(time.Second)
 		defer t.Stop()
 
@@ -1923,27 +1944,49 @@ func initDynamicMaxProgressbar(desc string, showBytes bool) *pb.ProgressBar {
 		return pb.DefaultSilent(1, desc)
 	}
 
-	bar := pb.NewOptions64(
-		1,
+	// A redrawing bar only makes sense on an interactive terminal: piped or
+	// redirected stderr would collect one line per redraw. Mute the bar there
+	// and let startByteProgress write an ordinary log line now and then.
+	width, _, err := term.GetSize(int(os.Stderr.Fd()))
+	if err != nil || os.Getenv("TERM") == "dumb" {
+		plainProgress = true
+		if showBytes {
+			return pb.DefaultBytesSilent(1, desc)
+		}
+		return pb.DefaultSilent(1, desc)
+	}
+
+	opts := []pb.Option{
 		pb.OptionSetDescription(fmt.Sprintf("%-20s", desc)),
 		pb.OptionSetWriter(os.Stderr),
 		pb.OptionShowBytes(showBytes),
-		pb.OptionSetWidth(10),
 		// Without ANSI codes the library clears the line by painting it with
 		// spaces before redrawing it, which reads as a flicker now that a
 		// transfer redraws several times a second rather than once per finished
 		// file. "\033[2K\r" erases in one sequence. The slower throttle cuts the
 		// redraws further; the byte figure still moves faster than it is read.
 		pb.OptionUseANSICodes(true),
-		pb.OptionThrottle(200*time.Millisecond),
-		pb.OptionShowCount(),
+		pb.OptionThrottle(200 * time.Millisecond),
 		pb.OptionOnCompletion(func() {
 			fmt.Printf("\n")
 		}),
 		pb.OptionSpinnerType(14),
-		pb.OptionFullWidth(),
-		pb.OptionSetPredictTime(true),
-	)
+	}
+
+	// A line wider than the terminal wraps, and the ANSI erase only clears the
+	// last of the wrapped rows, so every redraw would scroll the screen. The
+	// full format needs roughly 80 columns besides the bar itself; shed the
+	// widest decorations until the whole line is certain to fit.
+	switch {
+	case width >= 110:
+		opts = append(opts, pb.OptionShowCount(), pb.OptionSetPredictTime(true), pb.OptionFullWidth())
+	case width >= 85:
+		opts = append(opts, pb.OptionShowCount(), pb.OptionSetPredictTime(false), pb.OptionFullWidth())
+	default:
+		opts = append(opts, pb.OptionSetPredictTime(false), pb.OptionSetWidth(10))
+	}
+
+	bar := pb.NewOptions64(1, opts...)
 
 	bar.RenderBlank()
 	return bar
