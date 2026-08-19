@@ -189,7 +189,7 @@ results in the content of /tmp/data being uploaded into a new repository directo
 
 will have the content of /tmp/data uploaded into /dccn/DAC_3010000.01_173/data.
 
-By default, the upload process will skip existing files already in the repository. A file is considered "existing" if its destination has the same size and later modification time comparing to its source. One can use the "-f" flag to overwrite existing files.
+By default, the upload process will skip existing files already in the repository. A file is considered "existing" if its destination has the same size as its source. One can use the "-f" flag to overwrite existing files.
 	`,
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1508,16 +1508,14 @@ func (r *progressReader) Seek(offset int64, whence int) (int64, error) {
 // a second time.
 func putRepoFile(pfinfoLocal, pfinfoRepo pathFileInfo, showProgress bool, pbar *pb.ProgressBar) error {
 
-	// determine local file size and modification time
+	// determine local file size
 	ltsize := pfinfoLocal.info.Size()
-	ltmtime := pfinfoLocal.info.ModTime()
 
 	if pfinfoLocal.info.Mode()&fs.ModeSymlink != 0 {
 		// print a warning if the file is a symbolic link
 		logger.Warnf("symlink %s will be uploaded as regular file", pfinfoLocal.path)
 		if tinfo, err := os.Stat(pfinfoLocal.path); err == nil {
 			ltsize = tinfo.Size()
-			ltmtime = tinfo.ModTime()
 		}
 	}
 
@@ -1532,14 +1530,14 @@ func putRepoFile(pfinfoLocal, pfinfoRepo pathFileInfo, showProgress bool, pbar *
 				return nil
 			}
 
-			// compare file size
+			// Size alone decides "existing": recordings are written once and
+			// never modified in place, while local modtimes change whenever
+			// the data is copied to another disk.  Comparing modtimes would
+			// re-upload every file after such a copy.
 			hasSameSize := stat.Size() == ltsize
 
-			// compare file modtime
-			isRepoNewer := stat.ModTime().After(ltmtime)
-
-			if hasSameSize && isRepoNewer {
-				log.Debugf("skip file with same signature (size + modtime): %s\n", pfinfoRepo.path)
+			if hasSameSize {
+				log.Debugf("skip file with same signature (size): %s\n", pfinfoRepo.path)
 				countSkipped(pbar, ltsize)
 				return nil
 			}
