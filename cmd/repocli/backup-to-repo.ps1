@@ -79,10 +79,12 @@
         -Depth 2 -Include 'Rat7_491392*'
 
 .NOTES
+    Runs under Windows PowerShell and under pwsh on Linux/macOS alike.
+
     Prerequisites:
-      1. repocli.exe on PATH (or pass -Repocli C:\tools\repocli.exe)
+      1. repocli on PATH (or pass -Repocli /path/to/repocli)
       2. run `repocli config` once to store baseURL + data-access credentials
-         in %USERPROFILE%\.repocli.yml
+         in ~/.repocli.yml
     Uploads are intentionally serialized: every repocli invocation uses one
     worker, so at most one file is uploaded at a time.
 #>
@@ -97,10 +99,13 @@ param(
 
     [string]$Root = '',
 
-    [string]$Repocli = 'repocli.exe',
-    [string]$Config = (Join-Path $env:USERPROFILE '.repocli.yml'),
+    # 'repocli' resolves to repocli.exe on Windows through PATHEXT, and to the
+    # bare binary on Linux/macOS under pwsh.  $HOME works on both, unlike
+    # $env:USERPROFILE which is Windows-only.
+    [string]$Repocli = 'repocli',
+    [string]$Config = (Join-Path $HOME '.repocli.yml'),
     [string]$Url = '',
-    [string]$WorkDir = (Join-Path $env:USERPROFILE 'repocli-backup'),
+    [string]$WorkDir = (Join-Path $HOME 'repocli-backup'),
 
     [int]$Depth = 1,
     [ValidateRange(0, 100)]
@@ -469,12 +474,15 @@ function Invoke-Unit {
 
 $cmd = Get-Command $Repocli -ErrorAction SilentlyContinue
 if (-not $cmd) {
-    $local = Join-Path $PSScriptRoot 'repocli.exe'
-    if (Test-Path -LiteralPath $local) {
+    $local = @('repocli.exe', 'repocli') |
+        ForEach-Object { Join-Path $PSScriptRoot $_ } |
+        Where-Object { Test-Path -LiteralPath $_ } |
+        Select-Object -First 1
+    if ($local) {
         $cmd = Get-Command $local
     }
     else {
-        throw "repocli not found: '$Repocli'. Put repocli.exe on your PATH or pass -Repocli <path>."
+        throw "repocli not found: '$Repocli'. Put repocli on your PATH or pass -Repocli <path>."
     }
 }
 $script:RepocliPath = $cmd.Source
@@ -485,7 +493,7 @@ if (-not (Test-Path -LiteralPath $Source)) {
 $Source = (Resolve-Path -LiteralPath $Source).ProviderPath
 # Keep the trailing backslash of a drive root ("E:\"); "E:" would be read as
 # "current directory on E:" instead.
-if ($Source.Length -gt 3) { $Source = $Source.TrimEnd('\') }
+if ($Source.Length -gt 3) { $Source = $Source.TrimEnd('\', '/') }
 
 if (-not (Test-Path -LiteralPath $Config)) {
     throw "repocli configuration not found: $Config. Run 'repocli config' first."
